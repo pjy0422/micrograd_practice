@@ -33,21 +33,22 @@ for word in data:
         N[stoi[ch1], stoi[ch2], stoi[ch3]] += 1
 
 xs = torch.tensor(xs)
-ys = torch.tensor(ys).float()
+ys = torch.tensor(ys)
 print(xs.shape, ys.shape)
 g = torch.Generator().manual_seed(42)
 print(xs.shape, ys.shape)
 print(xs[0].shape)
 weight = torch.randn(2, 27, 27, requires_grad=True)
 
-max_epochs = 100
-loss = 0.0
+max_epochs = 500
 for epoch in range(max_epochs):
-    xenc = F.one_hot(xs, num_classes=27 * 27).float()
-    logits = xenc.view(-1, 2 * 27 * 27) @ weight.view(2 * 27 * 27, 1)
+    xenc = F.one_hot(xs, num_classes=27).float()
+    logits = torch.einsum("ijk,jkl->il", xenc, weight)
+    count = torch.exp(logits)
+    probs = count / count.sum(dim=1, keepdim=True)
 
+    tloss = -probs[torch.arange(len(ys)), ys].log().mean()
     weight.grad = None
-    loss.backward()
-    weight.data += -3 * weight.grad
-    log_likelihood = loss.item()
-    print(f"Epoch {epoch}: Loss: {log_likelihood}")
+    tloss.backward()
+    weight.data += -50 * weight.grad
+    print(f"Epoch {epoch}, Loss {tloss.item():.3f}")
