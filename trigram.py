@@ -26,14 +26,6 @@ def prepare_data():
     return data, stoi, itos
 
 
-def itos(index):
-    return chr(ord("a") + index)
-
-
-def stoi(char):
-    return ord(char) - ord("a")
-
-
 def split_data(data):
     random.shuffle(data)
     train_data = data[: int(0.8 * len(data))]
@@ -56,29 +48,101 @@ def get_input(data, stoi, itos):
     return torch.tensor(xs), torch.tensor(ys), N
 
 
-def train(data, max_epochs=500):
+def train(
+    data,
+    max_epochs=50,
+    stoi=None,
+    itos=None,
+    alpha=50,
+    lam=0.1,
+    enc="onehot",
+    loss="manual",
+):
     g = torch.Generator().manual_seed(42)
     weight = torch.randn(2, 27, 27, requires_grad=True)
-    xs, ys, N = get_input(data)
+    xs, ys, N = get_input(data, stoi=stoi, itos=itos)
     for epoch in range(max_epochs):
-        xenc = F.one_hot(xs, num_classes=27).float()
+        if enc == "onehot":
+            xenc = F.one_hot(xs, num_classes=27).float()
+        elif enc == "index":
+            one_hot_enc = F.one_hot(xs, num_classes=27).float()
+            xenc = torch.zeros((len(xs), 2, 27))
+            xenc[torch.arange(len(xs)), 0, xs[:, 0]] = 1
+            xenc[torch.arange(len(xs)), 1, xs[:, 1]] = 1
         logits = torch.einsum("ijk,jkl->il", xenc, weight)
         count = torch.exp(logits)
         probs = count / count.sum(dim=1, keepdim=True)
-
-        tloss = -probs[torch.arange(len(ys)), ys].log().mean()
+        if loss == "manual":
+            tloss = (
+                -probs[torch.arange(len(ys)), ys].log().mean()
+                + lam * (weight**2).mean()
+            )
+        elif loss == "ce":
+            tloss = F.cross_entropy(logits, ys) + lam * (weight**2).mean()
         weight.grad = None
         tloss.backward()
-        weight.data += -50 * weight.grad
-        print(f"Epoch {epoch}, Loss {tloss.item():.3f}")
+        weight.data -= alpha * weight.grad
+        print(f"Epoch {epoch}, Train Loss {tloss.item():.3f}")
+    return weight
 
 
-def main():
+def eval(data, stoi, itos, weight):
+    xs, ys, _ = get_input(data, stoi=stoi, itos=itos)
+    xenc = F.one_hot(xs, num_classes=27).float()
+    logits = torch.einsum("ijk,jkl->il", xenc, weight)
+    count = torch.exp(logits)
+    probs = count / count.sum(dim=1, keepdim=True)
+
+    tloss = -probs[torch.arange(len(ys)), ys].log().mean()
+    print(f"Loss {tloss.item():.3f}")
+    return tloss.item()
+
+
+def e_01():
+    data, stoi, itos = prepare_data()
+    train(data, stoi=stoi, itos=itos)
+    # Final loss is 2.263 which is better than bigram loss: 2.5, for 50 epochs
+
+
+def e_02():
     data, stoi, itos = prepare_data()
     train_data, dev_data, test_data = split_data(data)
+    weight = train(train_data, stoi=stoi, itos=itos, lam=0.01)
+    eval(dev_data, stoi, itos, weight)
+    eval(test_data, stoi, itos, weight)
+    # Evaluate on dev and test data
+    # Train loss is 2.291
+    # Dev loss is 2.29
+    # Test loss is 2.304
+    # The loss is consistent across all the datasets, so the model is notoverfitted.
 
-    train(train_data)
+
+def e_03():
+    data, stoi, itos = prepare_data()
+    train_data, dev_data, test_data = split_data(data)
+    lam_list = [0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    best_lam, best_loss = None, float("inf")
+    for lam in lam_list:
+        weight = train(train_data, stoi=stoi, itos=itos, lam=lam)
+        dev_loss = eval(dev_data, stoi, itos, weight)
+        if dev_loss < best_loss:
+            best_loss = dev_loss
+            best_lam = lam
+    print(f"Best lambda: {best_lam}, Best Loss: {best_loss}")
+    # Best lambda: 0.01, Best loss: 2.29
+
+
+def e_04():
+    data, stoi, itos = prepare_data()
+    train_data, dev_data, test_data = split_data(data)
+    weight = train(train_data, stoi=stoi, itos=itos, lam=0.01, enc="index")
+
+
+def e_05():
+    data, stoi, itos = prepare_data()
+    train_data, dev_data, test_data = split_data(data)
+    weight = train(train_data, stoi=stoi, itos=itos, lam=0.01, loss="ce")
 
 
 if __name__ == "__main__":
-    main()
+    e_04()
