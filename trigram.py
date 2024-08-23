@@ -1,4 +1,5 @@
-import numpy as np
+import random
+
 import torch
 import torch.nn.functional as F
 
@@ -15,40 +16,69 @@ E06: meta-exercise! Think of a fun/interesting exercise and complete it.
 """
 
 
-with open("names.txt", "r") as f:
-    data = f.read().splitlines()
-ch_list = ["."] + sorted(list(set("".join(data))))
+def prepare_data():
+    with open("names.txt", "r") as f:
+        data = f.read().splitlines()
+    ch_list = ["."] + sorted(list(set("".join(data))))
 
-stoi = {ch: i for i, ch in enumerate(ch_list)}
-itos = {i: ch for i, ch in enumerate(ch_list)}
+    stoi = {ch: i for i, ch in enumerate(ch_list)}
+    itos = {i: ch for i, ch in enumerate(ch_list)}
+    return data, stoi, itos
 
-xs = []
-ys = []
-N = torch.zeros((27, 27, 27))
-for word in data:
-    chs = ["."] + list(word) + ["."]
-    for ch1, ch2, ch3 in zip(chs, chs[1:], chs[2:]):
-        xs.append((stoi[ch1], stoi[ch2]))
-        ys.append(stoi[ch3])
-        N[stoi[ch1], stoi[ch2], stoi[ch3]] += 1
 
-xs = torch.tensor(xs)
-ys = torch.tensor(ys)
-print(xs.shape, ys.shape)
-g = torch.Generator().manual_seed(42)
-print(xs.shape, ys.shape)
-print(xs[0].shape)
-weight = torch.randn(2, 27, 27, requires_grad=True)
+def itos(index):
+    return chr(ord("a") + index)
 
-max_epochs = 500
-for epoch in range(max_epochs):
-    xenc = F.one_hot(xs, num_classes=27).float()
-    logits = torch.einsum("ijk,jkl->il", xenc, weight)
-    count = torch.exp(logits)
-    probs = count / count.sum(dim=1, keepdim=True)
 
-    tloss = -probs[torch.arange(len(ys)), ys].log().mean()
-    weight.grad = None
-    tloss.backward()
-    weight.data += -50 * weight.grad
-    print(f"Epoch {epoch}, Loss {tloss.item():.3f}")
+def stoi(char):
+    return ord(char) - ord("a")
+
+
+def split_data(data):
+    random.shuffle(data)
+    train_data = data[: int(0.8 * len(data))]
+    dev_data = data[int(0.8 * len(data)) : int(0.9 * len(data))]
+    test_data = data[int(0.9 * len(data)) :]
+
+    return train_data, dev_data, test_data
+
+
+def get_input(data, stoi, itos):
+    xs = []
+    ys = []
+    N = torch.zeros((27, 27, 27))
+    for word in data:
+        chs = ["."] + list(word) + ["."]
+        for ch1, ch2, ch3 in zip(chs, chs[1:], chs[2:]):
+            xs.append((stoi[ch1], stoi[ch2]))
+            ys.append(stoi[ch3])
+            N[stoi[ch1], stoi[ch2], stoi[ch3]] += 1
+    return torch.tensor(xs), torch.tensor(ys), N
+
+
+def train(data, max_epochs=500):
+    g = torch.Generator().manual_seed(42)
+    weight = torch.randn(2, 27, 27, requires_grad=True)
+    xs, ys, N = get_input(data)
+    for epoch in range(max_epochs):
+        xenc = F.one_hot(xs, num_classes=27).float()
+        logits = torch.einsum("ijk,jkl->il", xenc, weight)
+        count = torch.exp(logits)
+        probs = count / count.sum(dim=1, keepdim=True)
+
+        tloss = -probs[torch.arange(len(ys)), ys].log().mean()
+        weight.grad = None
+        tloss.backward()
+        weight.data += -50 * weight.grad
+        print(f"Epoch {epoch}, Loss {tloss.item():.3f}")
+
+
+def main():
+    data, stoi, itos = prepare_data()
+    train_data, dev_data, test_data = split_data(data)
+
+    train(train_data)
+
+
+if __name__ == "__main__":
+    main()
