@@ -19,7 +19,7 @@ itos = {i: c for c, i in stoi.items()}
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def build_dataset(words, block_size=3):
+def build_dataset(words, block_size=4):
     X, y = [], []
     for w in words:
         context = [0] * block_size
@@ -31,20 +31,20 @@ def build_dataset(words, block_size=3):
     return torch.tensor(X), torch.tensor(y)
 
 
-def train(X, y, lr=0.1, epochs=5000):
+def train(X, y, lr=0.015, epochs=220000):
     g = torch.Generator(device=device).manual_seed(2147483647)
-    C = torch.randn((27, 2), generator=g, requires_grad=True, device=device)
-    W1 = torch.randn((6, 100), generator=g, requires_grad=True, device=device)
-    b1 = torch.randn(100, generator=g, requires_grad=True, device=device)
-    W2 = torch.randn((100, 27), generator=g, requires_grad=True, device=device)
-    b2 = torch.randn(27, generator=g, requires_grad=True, device=device)
+    C = torch.randn((27, 12), generator=g, requires_grad=True, device=device)
+    W1 = torch.randn((48, 200), generator=g, requires_grad=True, device=device)
+    b1 = torch.randn(200, generator=g, requires_grad=True, device=device)
+    W2 = torch.zeros((200, 27), requires_grad=True, device=device)
+    b2 = torch.zeros(27, requires_grad=True, device=device)
     parameters = [C, W1, b1, W2, b2]
     X, y = X.to(device), y.to(device)
     for epoch in range(epochs):
         # forward pass
         ix = torch.randint(0, len(X), (32,))
         emb = C[X[ix]]
-        h = torch.tanh(emb.view(-1, 6) @ W1 + b1)
+        h = torch.tanh(emb.view(-1, 48) @ W1 + b1)
         logits = h @ W2 + b2
         loss = F.cross_entropy(logits, y[ix])
         # backward pass
@@ -52,9 +52,25 @@ def train(X, y, lr=0.1, epochs=5000):
             p.grad = None
         loss.backward()
         # update
+        if epoch < 100000:
+            lr = 0.1
+        elif epoch < 200000:
+            lr = 0.01
+        else:
+            lr = 0.001
         for p in parameters:
             p.data -= lr * p.grad
         print(f"epoch {epoch}, loss {loss.item()}")
+    return C, W1, b1, W2, b2
+
+
+def eval(X, y, parameters):
+    C, W1, b1, W2, b2 = parameters
+    X, y = X.to(device), y.to(device)
+    emb = C[X]
+    h = torch.tanh(emb.view(-1, 48) @ W1 + b1)
+    logits = h @ W2 + b2
+    return F.cross_entropy(logits, y)
 
 
 def split_dataset(words, p=0.8):
@@ -70,7 +86,9 @@ def split_dataset(words, p=0.8):
 
 def main():
     X_train, y_train, X_val, y_val, X_test, y_test = split_dataset(words)
-    train(X_train, y_train)
+    C, W1, b1, W2, b2 = train(X_train, y_train)
+    print("Dev loss", eval(X_val, y_val, [C, W1, b1, W2, b2]).item())
+    print("Test loss", eval(X_test, y_test, [C, W1, b1, W2, b2]).item())
 
 
 if __name__ == "__main__":
